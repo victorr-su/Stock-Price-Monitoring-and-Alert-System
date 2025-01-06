@@ -1,14 +1,11 @@
 [
   {
-    "symbol": "AAPL",
-    "target_price": 250.0
+    "symbol": "AAPL"
   },
   {
-    "symbol": "MSFT",
-    "target_price": 429.0
+    "symbol": "MSFT"
   },
   {
-    "symbol": "GOOGL",
-    "target_price": 193.0
+    "symbol": "GOOGL"
   }
 ]

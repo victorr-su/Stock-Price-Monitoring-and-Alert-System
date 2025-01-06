@@ -6,6 +6,7 @@ import (
 	"Stock-Price-Monitoring-and-Alert-System/internal/kafka/producer"
 	"fmt"
 	"log"
+	"strconv"
 	"time"
 )
 
@@ -28,8 +29,35 @@ func main() {
 	go func() {
 		for {
 			for _, stock := range stockConfigs {
-				// In place of FetchStockPrice, use a static price for testing
-				price := 100.0
+				// Fetch stock price
+				response, err := producer.FetchStockPrice(stock.Symbol)
+				if err != nil {
+					log.Printf("Error fetching stock price for %s: %v", stock.Symbol, err)
+					continue
+				}
+
+				var price float64
+				// Loop through the response and find the closing price
+				for _, data := range response.TimeSeries {
+					// Check if close exists in the map
+					closePrice, exists := data["4. close"]
+					if !exists {
+						log.Printf("Closing price not found for %s", stock.Symbol)
+						continue
+					}
+					price, err = strconv.ParseFloat(closePrice, 64)
+					if err != nil {
+						log.Printf("Failed to convert price for %s: %v", stock.Symbol, err)
+						continue
+					}
+					break // Exit loop once we find the closing price
+				}
+
+				// Check if the price was successfully parsed
+				if err != nil {
+					log.Printf("No valid closing price found for %s", stock.Symbol)
+					continue
+				}
 
 				// Produce the stock price to Kafka
 				err = producer.SendStockPrice(stock.Symbol, price)
@@ -39,11 +67,9 @@ func main() {
 					log.Printf("Produced price for %s: %.2f", stock.Symbol, price)
 				}
 			}
-			// Sleep for a fixed interval before sending the next price (1 minute in this case)
-			time.Sleep(1 * time.Second)
+			time.Sleep(30 * time.Minute)
 		}
 	}()
-
 	// Start the Kafka consumer
 	consumer.StartConsumer()
 }

@@ -24,7 +24,7 @@ func StartConsumer(){
 	defer consumer.Close()
 
 	//Subscribe to the topic
-	err = consumer.Subscribe("stock_prices", nil)
+	err = consumer.Subscribe("stock-prices", nil)
 	if err != nil {
 		log.Fatalf("Failed to subscribe to topic: %s\n", err)
 	}

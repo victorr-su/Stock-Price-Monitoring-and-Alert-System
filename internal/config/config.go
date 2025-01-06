@@ -7,7 +7,6 @@ import (
 )
 type StockConfig struct {
 	Symbol      string  `json:"symbol"`
-	TargetPrice float64 `json:"target_price"`
 }
 
 func LoadStocksConfig(filePath string) ([]StockConfig, error){
