@@ -1,6 +1,7 @@
 package main
 
 import (
+	"Stock-Price-Monitoring-and-Alert-System/internal/alert"
 	"Stock-Price-Monitoring-and-Alert-System/internal/config"
 	"Stock-Price-Monitoring-and-Alert-System/internal/kafka/consumer"
 	"Stock-Price-Monitoring-and-Alert-System/internal/kafka/producer"
@@ -24,6 +25,9 @@ func main() {
 	if err != nil {
 		log.Fatalf("Failed to initialize producer: %v", err)
 	}
+
+	// Track previous prices for each stock
+	previousPrices := make(map[string]float64)
 
 	// Start the Kafka producer in a separate goroutine
 	go func() {
@@ -59,6 +63,27 @@ func main() {
 					continue
 				}
 
+				// Check price change and send email if needed
+				if prevPrice, exists := previousPrices[stock.Symbol]; exists {
+					// Calculate the percentage change
+					priceChange := ((price - prevPrice) / prevPrice) * 100
+					if priceChange > 5 || priceChange < -5 {
+						// Send email notification if change is greater than 5% (positive or negative)
+						emailSubject := fmt.Sprintf("Stock Alert: %s Price Change > 5%%", stock.Symbol)
+						emailBody := fmt.Sprintf("The price of %s has changed by %.2f%% today. Current price: %.2f, Previous close: %.2f", stock.Symbol, priceChange, price, prevPrice)
+						
+						// Replace with your actual recipient email
+						emailRecipient := "su.victor03@gmail.com"
+						
+						err = alert.SendEmail(emailRecipient, emailSubject, emailBody)
+						if err != nil {
+							log.Printf("Failed to send email for %s: %v", stock.Symbol, err)
+						} else {
+							log.Printf("Email sent for %s: %.2f%% change", stock.Symbol, priceChange)
+						}
+					}
+				}
+
 				// Produce the stock price to Kafka
 				err = producer.SendStockPrice(stock.Symbol, price)
 				if err != nil {
@@ -66,8 +91,12 @@ func main() {
 				} else {
 					log.Printf("Produced price for %s: %.2f", stock.Symbol, price)
 				}
+
+				// Update previous price for the stock
+				previousPrices[stock.Symbol] = price
 			}
-			time.Sleep(30 * time.Minute)
+			// Sleep for 180 minutes before fetching the stock prices again
+			time.Sleep(180 * time.Minute)
 		}
 	}()
 	// Start the Kafka consumer
