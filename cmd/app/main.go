@@ -3,37 +3,71 @@ package main
 import (
 	"Stock-Price-Monitoring-and-Alert-System/internal/alert"
 	"Stock-Price-Monitoring-and-Alert-System/internal/config"
-	"Stock-Price-Monitoring-and-Alert-System/internal/kafka/consumer"
 	"Stock-Price-Monitoring-and-Alert-System/internal/kafka/producer"
 	"fmt"
 	"log"
 	"strconv"
+	"sync"
 	"time"
 )
+
+// Define a hashmap and mutex to store stock prices and ensure thread safety
+var stockPriceMap = make(map[string]float64)
+var mutex = &sync.Mutex{}
+
+// EmailData contains the dynamic data to populate the email template
+type EmailData struct {
+	StockSymbol     string
+	PercentageChange float64
+	Price           float64
+	Time            string
+}
 
 func main() {
 	fmt.Println("Stock price application started")
 
-	// Load stock configurations from the config file
+	// Load stock configurations
 	stockConfigs, err := config.LoadStocksConfig("/Users/victorsu/Desktop/Stock-Price-Project/Stock-Price-Monitoring-and-Alert-System/internal/config/stocks.json")
 	if err != nil {
 		log.Fatalf("Failed to load stock configurations: %v", err)
 	}
 
-	// Initialize the Kafka producer
+	// Initialize Kafka producer
 	err = producer.StartProducer()
 	if err != nil {
 		log.Fatalf("Failed to initialize producer: %v", err)
 	}
 
-	// Track previous prices for each stock
-	previousPrices := make(map[string]float64)
+	// Start a goroutine to clear the hashmap every 24 hours or at a specific time (e.g., market close at 4:00 PM)
+	go func() {
+		for {
+			// Get current time
+			now := time.Now()
 
-	// Start the Kafka producer in a separate goroutine
+			// Calculate the next reset time (Market close time - 4:00 PM)
+			nextClearTime := time.Date(now.Year(), now.Month(), now.Day(), 16, 0, 0, 0, now.Location()) // 4:00 PM local time
+
+			// If the current time is after 4:00 PM, set the next clear time to tomorrow
+			if now.After(nextClearTime) {
+				nextClearTime = nextClearTime.Add(24 * time.Hour)
+			}
+
+			// Sleep until the next scheduled reset time
+			time.Sleep(time.Until(nextClearTime))
+
+			// Clear the hashmap at the next reset time
+			mutex.Lock()
+			stockPriceMap = make(map[string]float64) // Clear the hashmap
+			mutex.Unlock()
+			log.Println("Cleared stock price map at market close.")
+		}
+	}()
+
+	// Start the main loop to fetch stock prices and send notifications
 	go func() {
 		for {
 			for _, stock := range stockConfigs {
-				// Fetch stock price
+				// Fetch the stock price
 				response, err := producer.FetchStockPrice(stock.Symbol)
 				if err != nil {
 					log.Printf("Error fetching stock price for %s: %v", stock.Symbol, err)
@@ -41,9 +75,7 @@ func main() {
 				}
 
 				var price float64
-				// Loop through the response and find the closing price
 				for _, data := range response.TimeSeries {
-					// Check if close exists in the map
 					closePrice, exists := data["4. close"]
 					if !exists {
 						log.Printf("Closing price not found for %s", stock.Symbol)
@@ -51,38 +83,41 @@ func main() {
 					}
 					price, err = strconv.ParseFloat(closePrice, 64)
 					if err != nil {
-						log.Printf("Failed to convert price for %s: %v", stock.Symbol, err)
+						log.Printf("Failed to parse price for %s: %v", stock.Symbol, err)
 						continue
 					}
-					break // Exit loop once we find the closing price
+					break
 				}
 
-				// Check if the price was successfully parsed
-				if err != nil {
-					log.Printf("No valid closing price found for %s", stock.Symbol)
-					continue
-				}
+				// Update the hashmap and check for a price change
+				mutex.Lock()
+				prevPrice, exists := stockPriceMap[stock.Symbol]
+				if exists {
+					percentageChange := ((price - prevPrice) / prevPrice) * 100
+					// if percentageChange >= 5 || percentageChange <= -5 {
+						// Create the email data structure
+						emailData := alert.EmailData{
+							StockSymbol:     stock.Symbol,
+							PercentageChange: percentageChange,
+							Price:           price,
+							Time:            time.Now().Format("2006-01-02 15:04:05"),
+						}
 
-				// Check price change and send email if needed
-				if prevPrice, exists := previousPrices[stock.Symbol]; exists {
-					// Calculate the percentage change
-					priceChange := ((price - prevPrice) / prevPrice) * 100
-					if priceChange > 5 || priceChange < -5 {
-						// Send email notification if change is greater than 5% (positive or negative)
-						emailSubject := fmt.Sprintf("Stock Alert: %s Price Change > 5%%", stock.Symbol)
-						emailBody := fmt.Sprintf("The price of %s has changed by %.2f%% today. Current price: %.2f, Previous close: %.2f", stock.Symbol, priceChange, price, prevPrice)
-						
 						// Replace with your actual recipient email
 						emailRecipient := "su.victor03@gmail.com"
 						
-						err = alert.SendEmail(emailRecipient, emailSubject, emailBody)
+						// Send the email using the template
+						err = alert.SendEmail(emailRecipient, "Stock Price Alert", emailData)
 						if err != nil {
 							log.Printf("Failed to send email for %s: %v", stock.Symbol, err)
 						} else {
-							log.Printf("Email sent for %s: %.2f%% change", stock.Symbol, priceChange)
+							log.Printf("Notification sent for %s: %.2f%% change.", stock.Symbol, percentageChange)
 						}
-					}
+					// }
 				}
+				// Update the hashmap with the latest price
+				stockPriceMap[stock.Symbol] = price
+				mutex.Unlock()
 
 				// Produce the stock price to Kafka
 				err = producer.SendStockPrice(stock.Symbol, price)
@@ -91,14 +126,11 @@ func main() {
 				} else {
 					log.Printf("Produced price for %s: %.2f", stock.Symbol, price)
 				}
-
-				// Update previous price for the stock
-				previousPrices[stock.Symbol] = price
 			}
-			// Sleep for 180 minutes before fetching the stock prices again
+			// Fetch prices every 30 minutes
 			time.Sleep(180 * time.Minute)
 		}
 	}()
-	// Start the Kafka consumer
-	consumer.StartConsumer()
+
+	select {} // Prevent the program from exiting
 }
