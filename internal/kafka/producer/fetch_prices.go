@@ -26,7 +26,7 @@ type AlphaVantageResponse struct {
 func FetchStockPrice(symbol string) (*AlphaVantageResponse, error){
 
 	// Load the .env file
-	err := godotenv.Load("/root/Stock-Price-Monitoring-and-Alert-System")
+	err := godotenv.Load("/root/Stock-Price-Monitoring-and-Alert-System/.env")
 	if err != nil {
 		log.Fatal("Error loading .env file")
 	}
