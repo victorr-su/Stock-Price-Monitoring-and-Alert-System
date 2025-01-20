@@ -27,7 +27,7 @@ func main() {
 	fmt.Println("Stock price application started")
 
 	// Load stock configurations
-	stockConfigs, err := config.LoadStocksConfig("/Users/victorsu/Desktop/Stock-Price-Project/Stock-Price-Monitoring-and-Alert-System/internal/config/stocks.json")
+	stockConfigs, err := config.LoadStocksConfig("/root/Stock-Price-Monitoring-and-Alert-System/internal/config/stocks.json")
 	if err != nil {
 		log.Fatalf("Failed to load stock configurations: %v", err)
 	}
